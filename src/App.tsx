@@ -23,8 +23,48 @@ export interface Slide {
 }
 
 function App() {
-  const [slides, setSlides] = useState<Slide[]>([]);
-  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [slides, setSlides] = useState<Slide[]>(() => {
+    const saved = localStorage.getItem("html-arrange-slides");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Failed to parse saved slides", e);
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("html-arrange-slides", JSON.stringify(slides));
+    } catch (e) {
+      console.warn("Could not save slides to local storage", e);
+    }
+  }, [slides]);
+
+  const [activeSlideIndex, setActiveSlideIndex] = useState(() => {
+    const saved = localStorage.getItem("html-arrange-active-slide");
+    if (saved) {
+      try {
+        return parseInt(saved, 10);
+      } catch (e) {
+        console.error("Failed to parse active slide index", e);
+      }
+    }
+    return 0;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("html-arrange-active-slide", activeSlideIndex.toString());
+  }, [activeSlideIndex]);
+
+  useEffect(() => {
+    if (slides.length > 0 && activeSlideIndex >= slides.length) {
+      setActiveSlideIndex(slides.length - 1);
+    }
+  }, [slides.length, activeSlideIndex]);
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarWide, setIsSidebarWide] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
