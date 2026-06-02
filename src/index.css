@@ -52,10 +52,42 @@ button:focus-visible { outline: 2px solid var(--shell-accent-hi); outline-offset
   width: 100%;
   height: 100%;
   border: 0;
-  display: none;
   background: var(--shell-bg);
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: center center;
+  z-index: 1;
 }
-#stage iframe.active { display: block; }
+
+/* visible is used to keep the element rendered during animations */
+#stage iframe.visible {
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+#stage iframe.active { opacity: 1; pointer-events: auto; z-index: 2; }
+
+:root { --transition-duration: 520ms; }
+
+/* ENTER / EXIT base */
+#stage iframe.enter, #stage iframe.exit { will-change: transform, opacity, filter; }
+
+/* Slide animations */
+@keyframes slide-in-next { from { transform: translateX(22%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slide-out-next { from { transform: translateX(0); opacity: 1; } to { transform: translateX(-18%); opacity: 0; } }
+@keyframes slide-in-prev { from { transform: translateX(-22%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slide-out-prev { from { transform: translateX(0); opacity: 1; } to { transform: translateX(18%); opacity: 0; } }
+
+.enter.slide.next  { animation: slide-in-next var(--transition-duration) cubic-bezier(.2,.9,.2,1) both; z-index:3 }
+.exit.slide.next   { animation: slide-out-next var(--transition-duration) cubic-bezier(.2,.9,.2,1) both; z-index:2 }
+.enter.slide.prev  { animation: slide-in-prev var(--transition-duration) cubic-bezier(.2,.9,.2,1) both; z-index:3 }
+.exit.slide.prev   { animation: slide-out-prev var(--transition-duration) cubic-bezier(.2,.9,.2,1) both; z-index:2 }
+
+/* reduce motion preference fallback */
+@media (prefers-reduced-motion: reduce) {
+  .enter, .exit, .enter *, .exit * { animation: none !important; transition: none !important; }
+}
 
 /* ============================================================
    HUD — slide counter + toggle buttons
@@ -386,6 +418,239 @@ body.sidebar-wide #sidebar { width: var(--sidebar-w-wide); }
   color: var(--shell-text);
 }
 
+/* ============================================================
+   CHAT ASSISTANT — compact edit panel for HTML instructions
+   ============================================================ */
+.html-chat-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 72px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 112px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(24, 31, 26, 0.96);
+  border: 1px solid var(--shell-border);
+  border-radius: 18px;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  padding: 14px;
+  z-index: 260;
+}
+
+.html-chat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.html-chat-kicker {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--shell-text-dim);
+  margin-bottom: 4px;
+}
+
+.html-chat-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--shell-text);
+}
+
+.html-chat-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--shell-text-dim);
+  background: var(--shell-panel-2);
+  flex-shrink: 0;
+}
+
+.html-chat-close:hover {
+  color: var(--shell-text);
+}
+
+.html-chat-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--shell-text-dim);
+}
+
+.html-chat-state {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(42, 53, 48, 0.9);
+  color: var(--shell-text-dim);
+}
+
+.html-chat-state.live {
+  background: rgba(90, 138, 107, 0.2);
+  color: var(--shell-text);
+}
+
+.html-chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding-right: 2px;
+  max-height: 260px;
+}
+
+.html-chat-message {
+  display: flex;
+}
+
+.html-chat-message span {
+  display: inline-block;
+  max-width: 92%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.html-chat-message.user {
+  justify-content: flex-end;
+}
+
+.html-chat-message.user span {
+  background: rgba(90, 138, 107, 0.22);
+  border: 1px solid rgba(123, 174, 137, 0.2);
+  color: var(--shell-text);
+}
+
+.html-chat-message.assistant span {
+  background: var(--shell-panel-2);
+  border: 1px solid var(--shell-border);
+  color: var(--shell-text);
+}
+
+.html-chat-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.html-chat-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  font-size: 12px;
+  color: var(--shell-text-dim);
+}
+
+.html-chat-controls select {
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--shell-border);
+  background: var(--shell-bg);
+  color: var(--shell-text);
+  padding: 0 10px;
+}
+
+.html-chat-secondary {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--shell-border);
+  background: var(--shell-panel-2);
+  color: var(--shell-text);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.html-chat-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.html-chat-prompt textarea {
+  width: 100%;
+  min-height: 86px;
+  resize: vertical;
+  border-radius: 14px;
+  border: 1px solid var(--shell-border);
+  background: var(--shell-bg);
+  color: var(--shell-text);
+  padding: 12px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.html-chat-prompt textarea::placeholder {
+  color: var(--shell-text-dim);
+}
+
+.html-chat-send {
+  align-self: flex-end;
+  min-width: 110px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--shell-accent);
+  color: #f5fbf7;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.html-chat-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.html-chat-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.html-chat-examples button {
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--shell-border);
+  background: rgba(34, 43, 37, 0.8);
+  color: var(--shell-text-dim);
+  font-size: 11px;
+}
+
+.html-chat-examples button:hover {
+  color: var(--shell-text);
+  background: rgba(34, 43, 37, 1);
+}
+
+@media (max-width: 720px) {
+  .html-chat-panel {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
+    width: auto;
+    max-height: calc(100vh - 24px);
+  }
+
+  .html-chat-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .html-chat-secondary,
+  .html-chat-send {
+    width: 100%;
+  }
+}
+
 /* Backdrop when sidebar is open on small viewports */
 #backdrop {
   position: fixed;
@@ -397,6 +662,14 @@ body.sidebar-wide #sidebar { width: var(--sidebar-w-wide); }
   z-index: 150;
 }
 #sidebar.open ~ #backdrop { opacity: 1; pointer-events: auto; }
+
+/* Flame overlay canvas */
+.flame-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
 
 /* Help overlay */
 #help {
