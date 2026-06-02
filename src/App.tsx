@@ -15,60 +15,21 @@ import {
   rectSortingStrategy,
 } from "@dnd-kit/sortable";
 import { SortableSlideItem } from "./components/SortableSlideItem";
-
-export interface Slide {
-  id: string;
-  name: string;
-  originalHtml: string;
-}
+import { exportPdf } from "./components/exportPDF";;
+import { HtmlChatPanel, type HtmlChatScope } from "./components/HtmlChatPanel";
+import { applyHtmlInstruction } from "./lib/htmlAssistant";
+import type { Slide } from "./lib/slide";
 
 function App() {
-  const [slides, setSlides] = useState<Slide[]>(() => {
-    const saved = localStorage.getItem("html-arrange-slides");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Failed to parse saved slides", e);
-      }
-    }
-    return [];
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("html-arrange-slides", JSON.stringify(slides));
-    } catch (e) {
-      console.warn("Could not save slides to local storage", e);
-    }
-  }, [slides]);
-
-  const [activeSlideIndex, setActiveSlideIndex] = useState(() => {
-    const saved = localStorage.getItem("html-arrange-active-slide");
-    if (saved) {
-      try {
-        return parseInt(saved, 10);
-      } catch (e) {
-        console.error("Failed to parse active slide index", e);
-      }
-    }
-    return 0;
-  });
-
-  useEffect(() => {
-    localStorage.setItem("html-arrange-active-slide", activeSlideIndex.toString());
-  }, [activeSlideIndex]);
-
-  useEffect(() => {
-    if (slides.length > 0 && activeSlideIndex >= slides.length) {
-      setActiveSlideIndex(slides.length - 1);
-    }
-  }, [slides.length, activeSlideIndex]);
-
+  const [slides, setSlides] = useState<Slide[]>([]);
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarWide, setIsSidebarWide] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isHudIdle, setIsHudIdle] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
+  const [transitionState, setTransitionState] = useState<{ from: number; to: number; dir: "next" | "prev"; type: "fade" | "slide" | "explode" } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hudIdleTimer = useRef<number | null>(null);
@@ -84,36 +45,85 @@ function App() {
     })
   );
 
-  const processFiles = async (files: File[]) => {
-    const htmlFiles = files.filter(
-      (file) => file.type === "text/html" || file.name.endsWith(".html")
+  const processFileEntries = async (
+    entries: Array<{ file: File; handle?: FileSystemFileHandle }>
+  ) => {
+    const htmlEntries = entries.filter(
+      ({ file }) => file.type === "text/html" || file.name.endsWith(".html") || file.name.endsWith(".htm")
     );
 
     const newSlides: Slide[] = [];
-    for (const file of htmlFiles) {
-      const text = await file.text();
+    for (const entry of htmlEntries) {
+      const text = await entry.file.text();
       newSlides.push({
         id: crypto.randomUUID(),
-        name: file.name,
+        name: entry.file.name,
         originalHtml: text,
+        fileHandle: entry.handle,
       });
     }
 
     setSlides((prev) => [...prev, ...newSlides]);
   };
 
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const processFiles = async (files: File[]) => {
+    await processFileEntries(files.map((file) => ({ file })));
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       processFiles(Array.from(e.dataTransfer.files));
     }
-  }, []);
+  };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       processFiles(Array.from(e.target.files));
     }
     e.target.value = "";
+  };
+
+  const handleOpenEditableFiles = async () => {
+    const picker = (window as Window & {
+      showOpenFilePicker?: (options?: {
+        multiple?: boolean;
+        types?: Array<{
+          description?: string;
+          accept: Record<string, string[]>;
+        }>;
+      }) => Promise<FileSystemFileHandle[]>;
+    }).showOpenFilePicker;
+
+    if (!picker) {
+      alert("Editable file access is not available in this browser. Use Add HTML Slides instead.");
+      return;
+    }
+
+    try {
+      const handles = await picker({
+        multiple: true,
+        types: [
+          {
+            description: "HTML files",
+            accept: { "text/html": [".html", ".htm"] },
+          },
+        ],
+      });
+
+      const entries = await Promise.all(
+        handles.map(async (handle) => ({
+          handle,
+          file: await handle.getFile(),
+        }))
+      );
+
+      await processFileEntries(entries);
+      setIsSidebarOpen(true);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      console.error(error);
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -135,6 +145,25 @@ function App() {
     }
   };
 
+  const TRANSITION_MS = 520;
+
+  const goToSlide = useCallback((targetIndex: number, type: "fade" | "slide" | "explode" = "slide") => {
+    if (targetIndex < 0 || targetIndex >= slides.length) return;
+    if (targetIndex === activeSlideIndex) return;
+    if (transitioning) return;
+
+    const dir = targetIndex > activeSlideIndex ? "next" : "prev";
+    setTransitionState({ from: activeSlideIndex, to: targetIndex, dir, type });
+    setTransitioning(true);
+
+    // schedule final index change after animation
+    setTimeout(() => {
+      setActiveSlideIndex(targetIndex);
+      setTransitioning(false);
+      setTransitionState(null);
+    }, TRANSITION_MS);
+  }, [activeSlideIndex, slides.length, transitioning]);
+
   const removeSlide = (id: string) => {
     setSlides((items) => {
       const index = items.findIndex((item) => item.id === id);
@@ -148,6 +177,76 @@ function App() {
       }
       return newItems;
     });
+  };
+
+  const handleAssistantSend = async (prompt: string, scope: HtmlChatScope) => {
+    if (slides.length === 0) {
+      return "Load one or more HTML files first.";
+    }
+
+    const targets = scope === "active"
+      ? slides[activeSlideIndex]
+        ? [slides[activeSlideIndex]]
+        : []
+      : slides;
+
+    if (targets.length === 0) {
+      return "There is no active slide to edit.";
+    }
+
+    const updates = new Map<string, string>();
+    const summaries: string[] = [];
+
+    for (const slide of targets) {
+      const result = applyHtmlInstruction(slide.originalHtml, prompt);
+      if (!result) continue;
+
+      updates.set(slide.id, result.html);
+      summaries.push(`${slide.name}: ${result.summary}`);
+    }
+
+    if (updates.size === 0) {
+      return 'I could not map that instruction yet. Try "set title to ...", "replace ... with ...", "remove ...", or "insert ... before </body>".';
+    }
+
+    setSlides((currentSlides) =>
+      currentSlides.map((slide) => {
+        const nextHtml = updates.get(slide.id);
+        return nextHtml ? { ...slide, originalHtml: nextHtml } : slide;
+      })
+    );
+
+    const persisted: string[] = [];
+    const failed: string[] = [];
+
+    await Promise.all(
+      targets.map(async (slide) => {
+        const nextHtml = updates.get(slide.id);
+        if (!nextHtml || !slide.fileHandle) return;
+
+        try {
+          const writable = await slide.fileHandle.createWritable();
+          await writable.write(nextHtml);
+          await writable.close();
+          persisted.push(slide.name);
+        } catch {
+          failed.push(slide.name);
+        }
+      })
+    );
+
+    const responseParts = [`Updated ${updates.size} slide${updates.size === 1 ? "" : "s"}.`];
+    if (persisted.length > 0) {
+      responseParts.push(`Wrote back to ${persisted.join(", ")}.`);
+    }
+    if (failed.length > 0) {
+      responseParts.push(`Could not write ${failed.join(", ")} back to disk.`);
+    }
+    if (summaries.length > 0) {
+      responseParts.push(summaries.slice(0, 2).join(" "));
+    }
+
+    return responseParts.join(" ");
   };
 
   const escapeHtml = (str: string) => {
@@ -412,20 +511,20 @@ updateUI();
         case 'PageDown':
         case ' ':
           e.preventDefault();
-          setActiveSlideIndex(i => Math.min(slides.length - 1, i + 1));
+          goToSlide(Math.min(slides.length - 1, activeSlideIndex + 1));
           break;
         case 'ArrowLeft':
         case 'PageUp':
           e.preventDefault();
-          setActiveSlideIndex(i => Math.max(0, i - 1));
+          goToSlide(Math.max(0, activeSlideIndex - 1));
           break;
         case 'Home':
           e.preventDefault();
-          setActiveSlideIndex(0);
+          goToSlide(0);
           break;
         case 'End':
           e.preventDefault();
-          setActiveSlideIndex(slides.length - 1);
+          goToSlide(slides.length - 1);
           break;
         case 's':
         case 'S':
@@ -454,7 +553,7 @@ updateUI();
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [slides.length, isHelpOpen]);
+  }, [slides.length, isHelpOpen, goToSlide, activeSlideIndex]);
 
   useEffect(() => {
     const resetHud = () => {
@@ -493,14 +592,26 @@ updateUI();
             </button>
           </div>
         ) : (
-          slides.map((slide, index) => (
-            <iframe
-              key={slide.id}
-              className={index === activeSlideIndex ? "active" : ""}
-              srcDoc={slide.originalHtml}
-              title={slide.name}
-            />
-          ))
+          slides.map((slide, index) => {
+            let cls = '';
+            const tr = transitionState;
+            if (!transitioning) {
+              cls = index === activeSlideIndex ? 'active visible' : '';
+            } else if (tr) {
+              if (index === tr.from) cls = `exit ${tr.type} ${tr.dir} visible`;
+              else if (index === tr.to) cls = `enter ${tr.type} ${tr.dir} visible`;
+              else cls = '';
+            }
+
+            return (
+              <iframe
+                key={slide.id}
+                className={cls}
+                srcDoc={slide.originalHtml}
+                title={slide.name}
+              />
+            );
+          })
         )}
       </main>
 
@@ -509,20 +620,21 @@ updateUI();
           <button 
             className="nav-arrow prev" 
             disabled={activeSlideIndex === 0}
-            onClick={() => setActiveSlideIndex(i => i - 1)}
+            onClick={() => goToSlide(activeSlideIndex - 1, 'slide')}
           >
             ‹
           </button>
           <button 
             className="nav-arrow next" 
             disabled={activeSlideIndex === slides.length - 1}
-            onClick={() => setActiveSlideIndex(i => i + 1)}
+            onClick={() => goToSlide(activeSlideIndex + 1, 'slide')}
           >
             ›
           </button>
 
           <div id="hud" className={isHudIdle ? "idle" : ""}>
             <span id="counter">{activeSlideIndex + 1} / {slides.length}</span>
+            <button title="AI edit chat" onClick={() => setIsChatOpen((value) => !value)}>AI</button>
             <button title="Overview (S)" onClick={() => setIsSidebarOpen(v => !v)}>☰</button>
             <button title="Fullscreen (F)" onClick={() => {
               if (!document.fullscreenElement) {
@@ -570,7 +682,7 @@ updateUI();
                   index={index}
                   isActive={index === activeSlideIndex}
                   onRemove={removeSlide}
-                  onClick={() => setActiveSlideIndex(index)}
+                  onClick={() => goToSlide(index, 'explode')}
                 />
               ))}
             </SortableContext>
@@ -590,6 +702,12 @@ updateUI();
                 ref={fileInputRef}
                 onChange={handleFileInput}
               />
+              <button
+                onClick={() => void handleOpenEditableFiles()}
+                className="mt-3 w-full py-3 border border-[#2A3530] rounded-xl text-[#E8EAD8] hover:bg-[#222B25] transition-colors"
+              >
+                Open Editable HTML
+              </button>
             </div>
           </ol>
         </DndContext>
@@ -597,6 +715,9 @@ updateUI();
         <footer className="sidebar-footer">
           <button onClick={exportPresentation} disabled={slides.length === 0}>
             Download Compiled HTML
+          </button>
+          <button onClick={() => exportPdf(slides)} disabled={slides.length === 0}>
+            Download PDF
           </button>
           <button 
             onClick={() => setSlides([])} 
@@ -629,6 +750,15 @@ updateUI();
           <button className="help-close" onClick={() => setIsHelpOpen(false)}>Got it</button>
         </div>
       </div>
+
+      <HtmlChatPanel
+        isOpen={isChatOpen}
+        activeSlideName={slides[activeSlideIndex]?.name}
+        canWriteBack={slides.some((slide) => Boolean(slide.fileHandle))}
+        onClose={() => setIsChatOpen(false)}
+        onOpenEditableFiles={() => void handleOpenEditableFiles()}
+        onSend={handleAssistantSend}
+      />
     </div>
   );
 }
