@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
   DndContext,
@@ -14,11 +16,11 @@ import {
   sortableKeyboardCoordinates,
   rectSortingStrategy,
 } from "@dnd-kit/sortable";
-import { SortableSlideItem } from "./components/SortableSlideItem";
-import { exportPdf } from "./components/exportPDF";;
-import { HtmlChatPanel, type HtmlChatScope } from "./components/HtmlChatPanel";
-import { applyHtmlInstruction } from "./lib/htmlAssistant";
-import type { Slide } from "./lib/slide";
+import { SortableSlideItem } from "@/components/SortableSlideItem";
+import { exportPdf } from "@/components/exportPDF";
+import { HtmlChatPanel, type HtmlChatScope } from "@/components/HtmlChatPanel";
+import { applyHtmlInstruction } from "@/lib/htmlAssistant";
+import type { Slide } from "@/lib/slide";
 
 function App() {
   const [slides, setSlides] = useState<Slide[]>([]);
