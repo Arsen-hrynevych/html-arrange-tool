@@ -19,7 +19,7 @@ import {
 import { SortableSlideItem } from "@/components/SortableSlideItem";
 import { exportPdf } from "@/components/exportPDF";
 import { HtmlChatPanel, type HtmlChatScope } from "@/components/HtmlChatPanel";
-import { applyHtmlInstruction } from "@/lib/htmlAssistant";
+import { buildCompiledPresentationHtml } from "@/lib/compiledPresentation";
 import type { Slide } from "@/lib/slide";
 
 function App() {
@@ -30,6 +30,12 @@ function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isHudIdle, setIsHudIdle] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishStatus, setPublishStatus] = useState<{
+    kind: "idle" | "success" | "error";
+    message: string;
+    url?: string;
+  }>({ kind: "idle", message: "" });
   const [transitioning, setTransitioning] = useState(false);
   const [transitionState, setTransitionState] = useState<{ from: number; to: number; dir: "next" | "prev"; type: "fade" | "slide" | "explode" } | null>(null);
   
@@ -134,8 +140,7 @@ function App() {
       setSlides((items) => {
         const oldIndex = items.findIndex((item) => item.id === active.id);
         const newIndex = items.findIndex((item) => item.id === over.id);
-        
-        // Adjust active index
+
         let newActiveIndex = activeSlideIndex;
         if (activeSlideIndex === oldIndex) newActiveIndex = newIndex;
         else if (oldIndex < activeSlideIndex && newIndex >= activeSlideIndex) newActiveIndex--;
@@ -158,7 +163,6 @@ function App() {
     setTransitionState({ from: activeSlideIndex, to: targetIndex, dir, type });
     setTransitioning(true);
 
-    // schedule final index change after animation
     setTimeout(() => {
       setActiveSlideIndex(targetIndex);
       setTransitioning(false);
@@ -170,7 +174,7 @@ function App() {
     setSlides((items) => {
       const index = items.findIndex((item) => item.id === id);
       if (index === -1) return items;
-      
+
       const newItems = items.filter((item) => item.id !== id);
       if (activeSlideIndex >= newItems.length) {
         setActiveSlideIndex(Math.max(0, newItems.length - 1));
@@ -199,10 +203,32 @@ function App() {
     const updates = new Map<string, string>();
     const summaries: string[] = [];
 
-    for (const slide of targets) {
-      const result = applyHtmlInstruction(slide.originalHtml, prompt);
-      if (!result) continue;
+    const results = await Promise.all(
+      targets.map(async (slide) => {
+        const response = await fetch("/api/html-assistant", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            html: slide.originalHtml,
+            instruction: prompt,
+            slideName: slide.name,
+          }),
+        });
 
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => null);
+          const message = errorBody?.error || `The assistant failed for ${slide.name}.`;
+          throw new Error(message);
+        }
+
+        const result = (await response.json()) as { html: string; summary: string };
+        return { slide, result };
+      })
+    );
+
+    for (const { slide, result } of results) {
       updates.set(slide.id, result.html);
       summaries.push(`${slide.name}: ${result.summary}`);
     }
@@ -251,246 +277,12 @@ function App() {
     return responseParts.join(" ");
   };
 
-  const escapeHtml = (str: string) => {
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  };
-
   const exportPresentation = () => {
     if (slides.length === 0) return;
 
-    // Use the exact UI from demo-deck for the exported HTML
-    const htmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Compiled Presentation</title>
-<style>
-  :root {
-    --shell-bg:         #0E1410;
-    --shell-panel:      #181F1A;
-    --shell-panel-2:    #222B25;
-    --shell-border:     #2A3530;
-    --shell-text:       #E8EAD8;
-    --shell-text-dim:   #98A099;
-    --shell-accent:     #5A8A6B;
-    --shell-accent-hi:  #7BAE89;
-  }
-
-  * { box-sizing: border-box; }
-  html, body {
-    margin: 0; padding: 0;
-    width: 100%; height: 100%;
-    background: var(--shell-bg);
-    color: var(--shell-text);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    overflow: hidden;
-  }
-
-  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
-  button:focus-visible { outline: 2px solid var(--shell-accent-hi); outline-offset: 2px; }
-
-  #stage {
-    position: absolute;
-    inset: 0;
-    background: var(--shell-bg);
-  }
-  #stage iframe {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    border: 0;
-    display: none;
-    background: var(--shell-bg);
-  }
-  #stage iframe.active { display: block; }
-
-  #hud {
-    position: fixed;
-    bottom: 14px;
-    right: 14px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(14, 20, 16, 0.75);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid var(--shell-border);
-    border-radius: 999px;
-    padding: 4px 6px 4px 14px;
-    z-index: 100;
-    transition: opacity 0.4s ease;
-    user-select: none;
-  }
-  #hud.idle { opacity: 0.18; }
-  #hud:hover { opacity: 1; }
-  #counter {
-    font-size: 13px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    color: var(--shell-text);
-    font-variant-numeric: tabular-nums;
-    padding-right: 8px;
-    border-right: 1px solid var(--shell-border);
-    margin-right: 4px;
-  }
-  #hud button {
-    width: 34px; height: 34px;
-    border-radius: 50%;
-    color: var(--shell-text-dim);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    transition: background 0.15s, color 0.15s;
-  }
-  #hud button:hover { background: var(--shell-panel-2); color: var(--shell-text); }
-
-  .nav-arrow {
-    position: fixed;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 56px;
-    height: 96px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 32px;
-    color: var(--shell-text-dim);
-    background: rgba(14, 20, 16, 0.0);
-    border: 0;
-    transition: background 0.2s, color 0.2s, opacity 0.4s;
-    z-index: 90;
-    opacity: 0;
-  }
-  body:hover .nav-arrow { opacity: 0.7; }
-  .nav-arrow:hover { background: rgba(14, 20, 16, 0.65); color: var(--shell-text); opacity: 1; }
-  .nav-arrow.prev { left: 0; border-radius: 0 6px 6px 0; }
-  .nav-arrow.next { right: 0; border-radius: 6px 0 0 6px; }
-  .nav-arrow:disabled { opacity: 0.15; cursor: default; }
-
-  #help {
-    position: fixed;
-    inset: 0;
-    background: rgba(14, 20, 16, 0.85);
-    backdrop-filter: blur(6px);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    z-index: 250;
-  }
-  #help.show { display: flex; }
-  .help-card {
-    background: var(--shell-panel);
-    border: 1px solid var(--shell-border);
-    border-radius: 14px;
-    padding: 28px 32px;
-    max-width: 460px;
-    width: calc(100% - 40px);
-  }
-  .help-card h2 { margin: 0 0 16px; font-size: 16px; font-weight: 600; color: var(--shell-text); }
-  .help-card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; font-size: 13px; }
-  .help-card dt { color: var(--shell-text-dim); text-align: right; }
-  .help-card dt kbd { background: var(--shell-bg); border: 1px solid var(--shell-border); border-radius: 4px; padding: 2px 6px; font-family: inherit; font-size: 11px; color: var(--shell-text); margin: 0 2px; }
-  .help-card dd { margin: 0; color: var(--shell-text); }
-  .help-close { margin-top: 18px; padding: 8px 16px; background: var(--shell-panel-2); border: 1px solid var(--shell-border); border-radius: 6px; color: var(--shell-text); font-size: 12px; cursor: pointer; }
-</style>
-</head>
-<body>
-  <main id="stage">
-    ${slides
-      .map((slide, index) => {
-        return `<iframe class="${index === 0 ? 'active' : ''}" srcdoc="${escapeHtml(slide.originalHtml)}"></iframe>`;
-      })
-      .join("\\n")}
-  </main>
-
-  <button class="nav-arrow prev" id="btn-prev" aria-label="Previous slide">‹</button>
-  <button class="nav-arrow next" id="btn-next" aria-label="Next slide">›</button>
-
-  <div id="hud">
-    <span id="counter">1 / ${slides.length}</span>
-    <button id="btn-fullscreen" title="Fullscreen (F)" aria-label="Toggle fullscreen">⛶</button>
-    <button id="btn-help" title="Help (?)" aria-label="Show keyboard shortcuts">?</button>
-  </div>
-
-  <div id="help">
-    <div class="help-card">
-      <h2>Keyboard shortcuts</h2>
-      <dl>
-        <dt><kbd>→</kbd> <kbd>Space</kbd></dt><dd>Next slide</dd>
-        <dt><kbd>←</kbd></dt><dd>Previous slide</dd>
-        <dt><kbd>Home</kbd></dt><dd>First slide</dd>
-        <dt><kbd>End</kbd></dt><dd>Last slide</dd>
-        <dt><kbd>F</kbd></dt><dd>Toggle fullscreen</dd>
-        <dt><kbd>?</kbd></dt><dd>This help</dd>
-      </dl>
-      <button class="help-close" id="btn-help-close">Got it</button>
-    </div>
-  </div>
-
-<script>
-const state = {
-  index: 0,
-  iframes: Array.from(document.querySelectorAll('#stage iframe')),
-  total: ${slides.length},
-  hudIdleTimer: null,
-};
-
-function goTo(i) {
-  if (i < 0 || i >= state.total) return;
-  state.iframes[state.index].classList.remove('active');
-  state.index = i;
-  state.iframes[state.index].classList.add('active');
-  updateUI();
-}
-
-function updateUI() {
-  document.getElementById('counter').textContent = (state.index + 1) + ' / ' + state.total;
-  document.getElementById('btn-prev').disabled = state.index === 0;
-  document.getElementById('btn-next').disabled = state.index === state.total - 1;
-}
-
-document.getElementById('btn-prev').addEventListener('click', () => goTo(state.index - 1));
-document.getElementById('btn-next').addEventListener('click', () => goTo(state.index + 1));
-document.getElementById('btn-fullscreen').addEventListener('click', () => {
-  if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen?.().catch(() => {});
-  } else {
-    document.exitFullscreen?.();
-  }
-});
-document.getElementById('btn-help').addEventListener('click', () => document.getElementById('help').classList.add('show'));
-document.getElementById('btn-help-close').addEventListener('click', () => document.getElementById('help').classList.remove('show'));
-
-document.addEventListener('keydown', e => {
-  if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); goTo(state.index + 1); }
-  else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); goTo(state.index - 1); }
-  else if (e.key === 'Home') { e.preventDefault(); goTo(0); }
-  else if (e.key === 'End') { e.preventDefault(); goTo(state.total - 1); }
-  else if (e.key.toLowerCase() === 'f') { e.preventDefault(); document.getElementById('btn-fullscreen').click(); }
-  else if (e.key === '?') { e.preventDefault(); document.getElementById('btn-help').click(); }
-  else if (e.key === 'Escape') { document.getElementById('help').classList.remove('show'); }
-});
-
-const hud = document.getElementById('hud');
-const resetHud = () => {
-  hud.classList.remove('idle');
-  clearTimeout(state.hudIdleTimer);
-  state.hudIdleTimer = setTimeout(() => hud.classList.add('idle'), 2500);
-};
-['mousemove', 'keydown', 'touchstart'].forEach(ev => window.addEventListener(ev, resetHud, { passive: true }));
-resetHud();
-updateUI();
-</script>
-</body>
-</html>`;
+    const htmlContent = buildCompiledPresentationHtml(
+      slides.map(({ name, originalHtml }) => ({ name, originalHtml }))
+    );
 
     const blob = new Blob([htmlContent], { type: "text/html" });
     const url = URL.createObjectURL(blob);
@@ -501,6 +293,49 @@ updateUI();
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const handleShareableLink = async () => {
+    if (slides.length === 0 || isPublishing) return;
+
+    setIsPublishing(true);
+    setPublishStatus({ kind: "idle", message: "Publishing to Netlify..." });
+
+    try {
+      const response = await fetch("/api/netlify-share", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          slides: slides.map(({ name, originalHtml }) => ({ name, originalHtml })),
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "Publishing failed.");
+      }
+
+      if (!payload?.url) {
+        throw new Error("Netlify did not return a shareable URL.");
+      }
+
+      if (navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(payload.url).catch(() => {});
+      }
+      setPublishStatus({
+        kind: "success",
+        message: "Shareable link is ready.",
+        url: payload.url,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Publishing failed.";
+      setPublishStatus({ kind: "error", message });
+    } finally {
+      setIsPublishing(false);
+    }
   };
 
   // Keyboard navigation & HUD idle
@@ -721,6 +556,9 @@ updateUI();
           <button onClick={() => exportPdf(slides)} disabled={slides.length === 0}>
             Download PDF
           </button>
+          <button onClick={handleShareableLink} disabled={slides.length === 0 || isPublishing}>
+            {isPublishing ? "Publishing..." : "Get Shareable Link"}
+          </button>
           <button 
             onClick={() => setSlides([])} 
             disabled={slides.length === 0}
@@ -728,6 +566,16 @@ updateUI();
           >
             Clear All
           </button>
+          {publishStatus.message ? (
+            <div className={`share-result ${publishStatus.kind}`}>
+              <span>{publishStatus.message}</span>
+              {publishStatus.url ? (
+                <a href={publishStatus.url} target="_blank" rel="noreferrer">
+                  Open link
+                </a>
+              ) : null}
+            </div>
+          ) : null}
           <div className="hint">
             Drag a slide to reorder.<br/>
             Drop HTML files anywhere to add.

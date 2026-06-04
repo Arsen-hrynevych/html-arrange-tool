@@ -80,7 +80,7 @@ export function SortableSlideItem({ id, name, htmlContent, index, isActive, onRe
         <iframe
           srcDoc={htmlContent}
           title={name}
-          sandbox=""
+          sandbox="allow-scripts"
           tabIndex={-1}
           aria-hidden="true"
         />
