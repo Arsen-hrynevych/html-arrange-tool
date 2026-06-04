@@ -74,12 +74,6 @@ export function HtmlChatPanel({
     }
   };
 
-  const examplePrompts = [
-    "set title to Marketing Workshop",
-    "replace hero with showcase",
-    'insert <div class="badge">Draft</div> before </body>',
-  ];
-
   return (
     <aside className="html-chat-panel" aria-label="HTML edit chat">
       <header className="html-chat-header">
@@ -132,20 +126,12 @@ export function HtmlChatPanel({
               void submit();
             }
           }}
-          placeholder='Example: "set title to Landing Page"'
+          placeholder='How can I help you today?'
           rows={4}
         />
         <button type="button" className="html-chat-send" onClick={submit} disabled={isSending}>
           {isSending ? "Applying..." : "Send edit"}
         </button>
-      </div>
-
-      <div className="html-chat-examples">
-        {examplePrompts.map((example) => (
-          <button key={example} type="button" onClick={() => setPrompt(example)}>
-            {example}
-          </button>
-        ))}
       </div>
     </aside>
   );
