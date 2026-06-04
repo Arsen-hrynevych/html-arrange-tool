@@ -401,6 +401,22 @@ body.sidebar-wide #sidebar { width: var(--sidebar-w-wide); }
 }
 .sidebar-footer button:hover { background: var(--shell-bg); border-color: var(--shell-accent); }
 .sidebar-footer button:disabled { opacity: 0.5; cursor: not-allowed; }
+.share-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px 2px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.share-result.success { color: var(--shell-accent-hi); }
+.share-result.error { color: #f87171; }
+.share-result a {
+  color: var(--shell-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .sidebar-footer .hint {
   font-size: 11px;
   color: var(--shell-text-dim);
