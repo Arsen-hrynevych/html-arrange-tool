@@ -19,7 +19,6 @@ import {
 import { SortableSlideItem } from "@/components/SortableSlideItem";
 import { exportPdf } from "@/components/exportPDF";
 import { HtmlChatPanel, type HtmlChatScope } from "@/components/HtmlChatPanel";
-import { applyHtmlInstruction } from "@/lib/htmlAssistant";
 import type { Slide } from "@/lib/slide";
 
 function App() {
@@ -199,10 +198,32 @@ function App() {
     const updates = new Map<string, string>();
     const summaries: string[] = [];
 
-    for (const slide of targets) {
-      const result = applyHtmlInstruction(slide.originalHtml, prompt);
-      if (!result) continue;
+    const results = await Promise.all(
+      targets.map(async (slide) => {
+        const response = await fetch("/api/html-assistant", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            html: slide.originalHtml,
+            instruction: prompt,
+            slideName: slide.name,
+          }),
+        });
 
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => null);
+          const message = errorBody?.error || `The assistant failed for ${slide.name}.`;
+          throw new Error(message);
+        }
+
+        const result = (await response.json()) as { html: string; summary: string };
+        return { slide, result };
+      })
+    );
+
+    for (const { slide, result } of results) {
       updates.set(slide.id, result.html);
       summaries.push(`${slide.name}: ${result.summary}`);
     }
